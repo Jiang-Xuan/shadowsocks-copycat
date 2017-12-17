@@ -1,0 +1,12 @@
+{
+    "server": "139.162.116.74",
+    "server_port": 8557,
+    "local_address": "127.0.0.1",
+    "local_port": 1090,
+    "password": "986944",
+    "timeout": 60000000,
+    "method": "aes-256-cfb",
+    "fast_open": false,
+    "dns_server": ["8.8.8.8", "8.8.8.4"],
+    "verbose": 1
+}
