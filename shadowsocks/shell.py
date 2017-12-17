@@ -13,7 +13,8 @@ import traceback
 
 from functools import wraps
 
-from shadowsocks.common import to_str
+from shadowsocks.common import to_str, to_bytes
+from shadowsocks import cryptor
 
 VERBOSE_LEVEL = 5
 
@@ -241,8 +242,8 @@ def check_config(config, is_local):
         logging.info('Specified DNS server: %s' % config['dns_server'])
 
     config['crypto_path'] = {'openssl': config['libopenssl'],
-                             'mbedtls': config['mbedtls'],
-                             'sodium': config['sodium']}
+                             'mbedtls': config['libmbedtls'],
+                             'sodium': config['libsodium']}
 
     cryptor.try_cipher(config['password'], config['method'],
                         config['crypto_path'])
@@ -320,13 +321,13 @@ Online help: <https://github.com/shadowsocks/shadowsocks>
 def _decode_list(data):
     rv = []
     for item in data:
-        if hasattr(value, 'encode'):
-            value = value.encode('utf-8')
-        elif isinstance(value, list):
-            value = _decode_list(value)
-        elif isinstance(value, dict):
-            value = _decode_dict(value)
-        rv.append(value)
+        if hasattr(item, 'encode'):
+            item = item.encode('utf-8')
+        elif isinstance(item, list):
+            item = _decode_list(item)
+        elif isinstance(item, dict):
+            item = _decode_dict(item)
+        rv.append(item)
     return rv
 
 def _decode_dict(data):

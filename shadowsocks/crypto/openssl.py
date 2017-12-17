@@ -23,14 +23,14 @@ ctx_cleanup = None
 
 CIPHER_ENC_UNCHANGED = -1
 
-def load_openssl(crypto_path = None):
+
+def load_openssl(crypto_path=None):
     global loaded, libcrypto, libsodium, buf, ctx_cleanup
 
     crypto_path = dict(crypto_path) if crypto_path else dict()
     path = crypto_path.get('openssl', None)
-    libcrypto = util.find_library(('crypto', 'eay32'),
-                                 'EVP_get_cipherbyname',
-                                 'libcrypto', path)
+    libcrypto = util.find_library(('crypto', 'eay32'), 'EVP_get_cipherbyname',
+                                  'libcrypto', path)
     if libcrypto is None:
         raise Exception('libcrypto(openssl) not found with path %s' % path)
 
@@ -39,7 +39,7 @@ def load_openssl(crypto_path = None):
 
     libcrypto.EVP_CipherInit_ex.argtypes = (c_void_p, c_void_p, c_char_p,
                                             c_char_p, c_char_p, c_int)
-    libcrypto.EVP_CIPHER_CTX_ctrl.argtypes = (c_void_p, c_int. c_int, c_void_p)
+    libcrypto.EVP_CIPHER_CTX_ctrl.argtypes = (c_void_p, c_int, c_int, c_void_p)
     libcrypto.EVP_CipherUpdate.argtypes = (c_void_p, c_void_p, c_void_p,
                                            c_char_p, c_int)
     libcrypto.EVP_CipherFinal_ex.argtypes = (c_void_p, c_void_p, c_void_p)
@@ -50,10 +50,14 @@ def load_openssl(crypto_path = None):
     except AttributeError:
         libcrypto.EVP_CIPHER_CTX_reset.argtypes = (c_void_p, )
         ctx_cleanup = libcrypto.EVP_CIPHER_CTX_reset
-    
-    buf = create_string_buffer(buf_size)
 
+    libcrypto.EVP_CIPHER_CTX_free.argtypes = (c_void_p, )
+    if hasattr(libcrypto, 'OpenSSL_add_all_ciphers'):
+        libcrypto.OpenSSL_add_all_ciphers()
+
+    buf = create_string_buffer(buf_size)
     loaded = True
+
 
 def load_cipher(cipher_name):
     func_name = 'EVP_' + cipher_name.replace(b'-', b'_')
@@ -84,7 +88,7 @@ class OpenSSLCryptoBase(object):
         self._cipher = cipher
         if not self._ctx:
             raise Exception('can not create cipher context')
-    
+
     def encrypt_once(self, data):
         return self.update(data)
 
@@ -109,4 +113,35 @@ class OpenSSLCryptoBase(object):
         )
 
         return buf.raw[:cipher_out_len.value]
+    def __del__(self):
+        self.clear()
 
+    def clear(self):
+        if self._ctx:
+            ctx_cleanup(self._ctx)
+            libcrypto.EVP_CIPHER_CTX_free(self._ctx)
+            self._ctx = None
+
+class OpenSSLStreamCrypto(OpenSSLCryptoBase):
+    '''
+    Crypto for stream modes: cfb, ofb, ctr
+    '''
+    def __init__(self, cipher_name, key, iv, op, crypto_path):
+        OpenSSLCryptoBase.__init__(self, cipher_name, crypto_path)
+        key_ptr = c_char_p(key)
+        iv_ptr = c_char_p(iv)
+        r = libcrypto.EVP_CipherInit_ex(self._ctx, self._cipher, None, key_ptr, iv_ptr, c_int(op))
+
+        if not r:
+            self.clear()
+            raise Exception('can not initialize cipher context')
+
+    def encrypt(self, data):
+        return self.update(data)
+
+    def decrypt(self, data):
+        return self.update(data)
+
+ciphers = {
+    'aes-256-cfb': (32, 16, OpenSSLStreamCrypto)
+}

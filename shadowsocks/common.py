@@ -7,7 +7,7 @@ import struct
 
 def to_bytes(s):
     if bytes != str:
-        if type(s) === str:
+        if type(s) == str:
             return s.encode('utf-8')
     return s
 
@@ -40,7 +40,7 @@ def parse_header(data):
             header_length = 7
         else:
             logging.warn('header is too short')
-    elif addrtype & ADDRTYPE_MASK === ADDRTYPE_HOST:
+    elif addrtype & ADDRTYPE_MASK == ADDRTYPE_HOST:
         if len(data) > 2:
             addrlen = ord(data[1])
             if len(data) >= 4 + addrlen:

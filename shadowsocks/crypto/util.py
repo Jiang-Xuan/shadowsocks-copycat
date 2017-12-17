@@ -22,7 +22,7 @@ def load_library(path, search_symbol, library_name):
 
 def find_library(possible_lib_names, search_symbol, library_name, \
                  custom_path = None):
-    import ctypes.utils
+    import ctypes.util
 
     if custom_path:
         load_library(custom_path, search_symbol, library_name)
@@ -38,7 +38,7 @@ def find_library(possible_lib_names, search_symbol, library_name, \
         lib_names.append('lib' + lib_name)
 
     for name in lib_names:
-        if os.name = 'nt':
+        if os.name == 'nt':
             paths.extend(find_library_nt(name))
         else:
             path = ctypes.util.find_library(name)

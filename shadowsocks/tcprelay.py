@@ -105,6 +105,12 @@ class TCPRelayHandler(object):
         self._forbidden_iplist = config.get('forbidden_ip')
         if is_local:
             self._chosen_server = self._get_a_server()
+        fd_to_handlers[local_sock.fileno()] = self
+        local_sock.setblocking(False)
+        local_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+        loop.add(local_sock, eventloop.POLL_IN | eventloop.POLL_ERR, self._server)
+        self.last_activity = 0
+        self._update_activity()
     
     def _get_a_server(self):
         server = self._config['server']
@@ -116,5 +122,53 @@ class TCPRelayHandler(object):
             server = random.choice(server)
         logging.debug('chosen server: %s:%d', server, server_port)
         return server, server_port
+
+class TCPRelay(object):
+    def __init__(self, config, dns_resolver, is_local, stat_callback=None):
+        self._config = config
+        self._is_local = is_local
+        self._dns_resolver = dns_resolver
+        self._closed = False
+        self._eventloop = None
+        self._fd_to_handlers = {}
+
+        self._timeout = config['timeout']
+        self._timeouts = []
+        self._timeout_offset = 0
+        self._handler_to_timeouts = {}
+
+        if is_local:
+            listen_addr = config['local_address']
+            listen_port = config['local_port']
+
+        self._listen_port = listen_port
+
+        addrs = socket.getaddrinfo(listen_addr, listen_port, 0, socket.SOCK_STREAM, socket.SOL_TCP)
+
+        if len(addrs) == 0:
+            raise Exception("can't get addrinfo for %s:%d" % (listen_addr, listen_port))
+
+        af, socktype, proto, canonname, sa = addrs[0]
+
+        server_socket = socket.socket(af, socktype, proto)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind(sa)
+        server_socket.setblocking(False)
+        server_socket.listen(1024)
+
+        self._server_socket = server_socket
+        self._stat_callback = stat_callback
+
+    def add_to_loop(self, loop):
+        if self._eventloop:
+            raise Exception('already add to loop')
+        if self._closed:
+            raise Exception('already closed')
+        
+        self._eventloop = loop
+        self._eventloop.add(self._server_socket,
+                            eventloop.POLL_IN | eventloop.POLL_ERR,
+                            self)
+
 
 
