@@ -70,12 +70,14 @@ class KqueueLoop(object):
             events.append(
                 select.kevent(fd, select.KQ_FILTER_WRITE, flags)
             )
+        for e in events:
+            self._kqueue.control([e], 0)
 
     def poll(self, timeout):
         if timeout < 0:
             timeout = None
         events = self._kqueue.control(
-            None, Kqueue.MAX_EVENT, timeout
+            None, KqueueLoop.MAX_EVENT, timeout
         )
         result = defaultdict(lambda: POLL_NULL)
         for e in events:
@@ -117,7 +119,7 @@ class EventLoop(object):
         result = []
 
         for fd, eventMode in events:
-            result.append((self._fdmap[fd][0], fd, event))
+            result.append((self._fdmap[fd][0], fd, eventMode))
 
         return result
 
@@ -151,11 +153,11 @@ class EventLoop(object):
         self._impl.modify(fd, mode)
 
     def stopping(self):
-        self.stopping = True
+        self._stopping = True
 
     def run(self):
         events = []
-        while not self.stopping:
+        while not self._stopping:
             asap = False
             try:
                 events = self.poll(TIMEOUT_PRECISION)
@@ -168,13 +170,13 @@ class EventLoop(object):
                     traceback.print_exc()
                     continue
 
-            for sock, fd, event in events:
+            for sock, fd, eventMode in events:
                 handler = self._fdmap.get(fd, None)
 
                 if handler is not None:
                     handler = handler[1]
                     try:
-                        handler.handler_event(sock, fd, mode)
+                        handler.handle_event(sock, fd, eventMode)
                     except (OSError, IOError) as e:
                         shell.print_exception(e)
 

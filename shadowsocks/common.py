@@ -17,11 +17,27 @@ def to_str(s):
             return s.decode('utf-8')
     return s
 
+def compat_ord(s):
+    if type(s) == int:
+        return s
+    return _ord(s)
+
+def compat_chr(d):
+    if bytes == str:
+        return _chr(d)
+    return bytes([d])
+
+_ord = ord
+_chr = chr
+ord = compat_ord
+chr = compat_chr
+
 ADDRTYPE_IPV4 = 0x01
 ADDRTYPE_IPV6 = 0x04
 ADDRTYPE_HOST = 0x03
 ADDRTYPE_AUTH = 0x10
 ADDRTYPE_MASK = 0xF
+
 
 def parse_header(data):
     '''
@@ -36,7 +52,7 @@ def parse_header(data):
     if addrtype & ADDRTYPE_MASK == ADDRTYPE_IPV4:
         if len(data) >= 7:
             dest_addr = socket.inet_ntoa(data[1:5])
-            dest_addr = struct.unpack('>H', data[5:7])[0]
+            dest_port = struct.unpack('>H', data[5:7])[0]
             header_length = 7
         else:
             logging.warn('header is too short')
@@ -45,8 +61,9 @@ def parse_header(data):
             addrlen = ord(data[1])
             if len(data) >= 4 + addrlen:
                 dest_addr = data[2:2 + addrlen]
-                dest_port = struct.unpack('>H', data[2 + addrlen:4 + addrlen])[0]
-                
+                dest_port = struct.unpack('>H',
+                                          data[2 + addrlen:4 + addrlen])[0]
+
                 header_length = 4 + addrlen
             else:
                 logging.warn('header is too short')
@@ -55,7 +72,7 @@ def parse_header(data):
     else:
         logging.warn('upsupported addrtype %d, maybe wrong password or'
                      'encryption method' % addrtype)
-    
+
     if dest_addr is None:
         return None
     return addrtype, to_bytes(dest_addr), dest_port, header_length

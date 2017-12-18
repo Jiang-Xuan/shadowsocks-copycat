@@ -101,3 +101,29 @@ class Cryptor(object):
         if op == CIPHER_ENC_ENCRYPTION:
             self.cipher_iv = iv
         return m[METHOD_INFO_CRYPTO](method, key, iv, op, self.crypto_path)
+
+    def encrypt(self, buf):
+        if len(buf) == 0:
+            return buf
+        if self.iv_sent:
+            return self.cipher.encrypt(buf)
+        else:
+            self.iv_sent = True
+            return self.cipher_iv + self.cipher.encrypt(buf)
+
+    def decrypt(self, buf):
+        if len(buf) == 0:
+            return buf
+        if self.decipher is None:
+            decipher_iv_len = self._method_info[METHOD_INFO_IV_LEN]
+            decipher_iv = buf[:decipher_iv_len]
+            self.decipher_iv = decipher_iv
+            self.decipher = self.get_cipher(
+                self.password, self.method,
+                CIPHER_ENC_DESCYPTION,
+                decipher_iv
+            )
+            buf = buf[decipher_iv_len:]
+            if len(buf) == 0:
+                return buf
+        return self.decipher.decrypt(buf)
