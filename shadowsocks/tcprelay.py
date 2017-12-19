@@ -138,7 +138,7 @@ class TCPRelayHandler(object):
         loop.add(local_sock, eventloop.POLL_IN | eventloop.POLL_ERR, self._server)
         self.last_activity = 0
         self._update_activity()
-    
+
     def _get_a_server(self):
         server = self._config['server']
         server_port = self._config['server_port']
@@ -164,15 +164,28 @@ class TCPRelayHandler(object):
 
         # 如果发生事件的是 服务端(server_socket)连接的 socket
         if sock == self._remote_sock:
+            logging.info(
+                '[%d] - [%d]: handle_event 触发事件的是 _remote_sock' %
+                (self._local_sock.fileno(), self._remote_sock.fileno())
+            )
             if event & eventloop.POLL_ERR:
+                logging.info(
+                    '[%d] - [%d]: handle_event _remote_sock 触发 POLL_ERR' %
+                    (self._local_sock.fileno(), self._remote_sock.fileno()))
                 self._on_remote_error()
                 if self._stage == STAGE_DESTROYED:
                     return
             if event & (eventloop.POLL_IN | eventloop.POLL_HUP):
+                logging.info(
+                    '[%d] - [%d]: handle_event _remote_sock 触发 POLL_IN 读取 remote 数据 => _on_remote_read'
+                    % (self._local_sock.fileno(), self._remote_sock.fileno()))
                 self._on_remote_read()
                 if self._stage == STAGE_DESTROYED:
                     return
             if event & eventloop.POLL_OUT:
+                logging.info(
+                    '[%d] - [%d]: handle_event _remote_sock 触发 POLL_OUT 写入 remote 数据 => _on_remote_write'
+                    % (self._local_sock.fileno(), self._remote_sock.fileno()))
                 self._on_remote_write()
         elif sock == self._local_sock:
             if event & eventloop.POLL_ERR:
@@ -187,7 +200,7 @@ class TCPRelayHandler(object):
                 self._on_local_write()
         else:
             logging.warn('unknown socket')
-    
+
     def _on_local_read(self):
         '''
         从客户端来了数据
@@ -203,9 +216,13 @@ class TCPRelayHandler(object):
         except (OSError, IOError) as e:
             if eventloop.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
+
+        logging.info('[%d]: _on_local_read local 数据被读取 数据为: [%s]' %
+                     (self._local_sock.fileno(),
+                      ''.join(['0x%02x ' % ord(x) for x in data])))
         # 如果没有数据, 说明对方 socket 主动关闭
         if not data:
-            self.destory()
+            self.destroy()
             return
         self._update_activity(len(data))
 
@@ -219,8 +236,12 @@ class TCPRelayHandler(object):
             self._handle_stage_connecting(data)
         elif self._stage == STAGE_ADDR:
             self._handle_stage_addr(data)
-    
+
     def _handle_stage_init(self, data):
+        logging.info(
+            '[%d]: _handle_stage_init 处理该 local socket 的握手阶段 握手数据[%s]' %
+            (self._local_sock.fileno(),
+             ''.join(['0x%02x ' % ord(x) for x in data])))
         try:
             _check_auth_method(data)
         except BadSocksHeader:
@@ -231,7 +252,18 @@ class TCPRelayHandler(object):
             self.destory()
             return
 
+        logging.info(
+            '[%d]: _handle_stage_init 校验握手数据包(%s)成功, 写入响应握手包(\\x05\\x00)' %
+            (
+                self._local_sock.fileno(),
+                ''.join(['0x%02x ' % ord(x) for x in data])
+            )
+        )
         self._write_to_sock(b'\x05\x00', self._local_sock)
+        logging.info(
+            '[%d]: _handle_stage_init 握手包响应成功, 进入 STAGE_ADDR 阶段' %
+            (self._local_sock.fileno())
+        )
         self._stage = STAGE_ADDR
 
     def _update_stream(self, stream, status):
@@ -300,9 +332,20 @@ class TCPRelayHandler(object):
         return True
 
     def _handle_stage_addr(self, data):
+        logging.info(
+            '[%d]: _handle_stage_addr 处理该阶段的数据(%s)' %
+            (
+                self._local_sock.fileno(),
+                ''.join(['0x%02x ' % ord(x) for x in data])
+            )
+        )
         cmd = common.ord(data[1])
 
         if cmd == CMD_CONNECT:
+            logging.info(
+                '[%d]: _handle_stage_addr socks5 连接命令(\\x01) ' %
+                (self._local_sock.fileno())
+            )
             data = data[3:]
 
         header_result = parse_header(data)
@@ -311,30 +354,67 @@ class TCPRelayHandler(object):
             raise Exception('can not parse header')
         addrtype, remote_addr, remote_port, header_length = header_result
         logging.info(
-            'connecting %s:%d from %s:%d' %
-            (common.to_str(remote_addr), remote_port,
-            self._client_address[0], self._client_address[1])
+            '[%d]: _handle_stage_addr data的解析结果(addrtype: %s, remote_addr: %s, remote_port: %d, header_length: %d)' %
+            (self._local_sock.fileno(), common.to_str(addrtype), remote_addr, remote_port, header_length)
         )
+
+        logging.info('[%d]: _handle_stage_addr connecting %s:%d from %s:%d' %
+                     (self._local_sock.fileno(), common.to_str(remote_addr), remote_port,
+                      self._client_address[0], self._client_address[1]))
 
         self._remote_address = (common.to_str(remote_addr), remote_port)
 
         self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
+        logging.info(
+            '[%d]: _handle_stage_addr 进入 STAGE_DNS 阶段, 查询服务器的 IP地址' %
+            (self._local_sock.fileno())
+        )
         self._stage = STAGE_DNS
 
         self._write_to_sock(b'\x05\x00\x00\x01'
                             b'\x00\x00\x00\x00\x10\x10',
                             self._local_sock)
         data_to_send = self._cryptor.encrypt(data)
+        logging.info(
+            '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 加密后的请求数据(%s)' %
+            (self._local_sock.fileno(), data_to_send)
+        )
         self._data_to_write_to_remote.append(data_to_send)
+
+        logging.info(
+            '[%d]: _handle_stage_addr 将加密后的数据存放到 _data_to_write_to_remote 之后调用 DNS 请求解析 ss 服务端地址' %
+            (self._local_sock.fileno())
+        )
         self._dns_resolver.resolve(self._chosen_server[0],
                                    self._handle_dns_resolved)
-    
+
     def _handle_stage_connecting(self, data):
+        logging.info(
+            '[%d] - [%d]: _handle_stage_connecting 处理 stSTAGE_CONNECTING 阶段的数据(%s)'
+            % (self._local_sock.fileno(), self._remote_sock.fileno(),
+               data))
         data = self._cryptor.encrypt(data)
         self._data_to_write_to_remote.append(data)
+        logging.info(
+            '[%d] - [%d]: _handle_stage_connecting 加密后数据(%s) 数据被添加进 _data_to_write_to_remote 因为此时 remote_sock[fd: %d] 还没有建立连接' %
+            (
+                self._local_sock.fileno(),
+                self._remote_sock.fileno(),
+                ''.join(['0x%02x ' % ord(x) for x in data]),
+                self._remote_sock.fileno()
+            )
+        )
 
     def _handle_dns_resolved(self, result, error):
+        logging.info(
+            '[%d]: _handle_dns_resolved DNS 解析完成(ip: %s, ip: %s)' %
+            (self._local_sock.fileno(), result[0], result[1])
+        )
         if error:
+            logging.info(
+                '[%d]: _handler_dns_resolved DNS 解析出错(err: %s) 调用destroy销毁该连接' %
+                (self._local_sock.fileno(), error)
+            )
             addr, port = self._client_address[0], self._client_address[1]
             logging.error(
                 '%s when handling connection from %s:%d' %
@@ -347,33 +427,51 @@ class TCPRelayHandler(object):
             return
 
         ip = result[1]
+        logging.info(
+            '[%d]: _handle_dns_resolved 进入 STAGE_CONNECTING 阶段, 开始连接 ss 服务端' %
+            (self._local_sock.fileno()))
         self._stage = STAGE_CONNECTING
         remote_addr = ip
         remote_port = self._chosen_server[1]
 
+        logging.info('[%d]: _handle_dns_resolved 创建连接 ss 服务端的 socket ' %
+                     (self._local_sock.fileno()))
         remote_sock = self._create_remote_sock(remote_addr, remote_port)
+        logging.info(
+            '[%d]: _handle_dns_resolved 连接 ss 服务端 的 socket(fd: [%d]) 创建成功' %
+            (self._local_sock.fileno(), self._remote_sock.fileno()))
 
         try:
+            logging.info(
+                '[%d] - [%d]: _handle_dns_resolved 调用 connect 方法尝试连接 ss 服务器' %
+                (self._local_sock.fileno(), self._remote_sock.fileno()))
             remote_sock.connect((remote_addr, remote_port))
         except (OSError, IOError) as e:
             if eventloop.errno_from_exception(e) == errno.EINPROGRESS:
                 pass
-        self._loop.add(remote_sock,
-                       eventloop.POLL_ERR | eventloop.POLL_OUT,
+
+        logging.info(
+            '[%d] - [%d]: _handle_dns_resolved 和 ss 服务器的连接还在创建中, 将 remote_sock 加入 loop 中'
+            % (self._local_sock.fileno(), self._remote_sock.fileno()))
+        self._loop.add(remote_sock, eventloop.POLL_ERR | eventloop.POLL_OUT,
                        self._server)
+
+        logging.info(
+            '[%d] - [%d]: _handle_dns_resolved 进入 STAGE_CONNECTING 中' %
+            (self._local_sock.fileno(), self._remote_sock.fileno()))
         self._stage = STAGE_CONNECTING
         self._update_stream(STREAM_UP, WAIT_STATUS_READWRITING)
         self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
 
     def _create_remote_sock(self, ip, port):
         addrs = socket.getaddrinfo(ip, port, 0, socket.SOCK_STREAM, socket.SOL_TCP)
-        
+
         if len(addrs) == 0:
             raise Exception(
                 'getaddrinfo failed for %s:%d' %
                 (ip, port)
             )
-        
+
         af, socktype, proto, canonname, sa = addrs[0]
 
         if self._forbidden_iplist:
@@ -389,21 +487,37 @@ class TCPRelayHandler(object):
         remote_sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
         return remote_sock
     def _on_remote_write(self):
+        logging.info(
+            '[%d] -[%d]: _on_remote_write _data_to_write_to_remote中的数据写向 _remote_sock 此时远程连接成功建立, 进入 STAGE_STREAM 阶段'
+            % (self._local_sock.fileno(), self._remote_sock.fileno()))
         self._stage = STAGE_STREAM
         if self._data_to_write_to_remote:
+            logging.info(
+                '[%d] - [%d]: _on_remote_write _data_to_write_to_remote有数据, 拼起来, 置空_data_to_write_to_remote, 将拼起来的数据写向 _remote_sock'
+                % (self._local_sock.fileno(), self._remote_sock.fileno()))
             data = b''.join(self._data_to_write_to_remote)
             self._data_to_write_to_remote = []
             self._write_to_sock(data, self._remote_sock)
         else:
+            logging.info(
+                '[%d] - [%d]: _on_remote_write _data_to_write_to_remote没有数据, STREAM_UP 流向置为读, 因为没有数据在STREAM_UP 上面写'
+                % (self._local_sock.fileno(), self._remote_sock.fileno()))
             self._update_stream(STREAM_UP, WAIT_STATUS_READING)
-    
+
     def _handle_stage_stream(self, data):
+        logging.info(
+            '[%d] - [%d]: _handle_stage_stream STAGE_STREAM 阶段, 直接将数据(%s)加密后写向 _remote_sock'
+            % (self._local_sock.fileno(), self._remote_sock.fileno(),
+               data))
         data = self._cryptor.encrypt(data)
         self._write_to_sock(data, self._remote_sock)
-
         return
 
     def _on_remote_read(self):
+        logging.info(
+            '[%d] - [%d]: _on_remote_read 从远程读取数据' %
+            (self._local_sock.fileno(), self._remote_sock.fileno())
+        )
         data = None
 
         buf_size = UP_STREAM_BUF_SIZE
@@ -413,13 +527,44 @@ class TCPRelayHandler(object):
         except (OSError, IOError) as e:
             if eventloop.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
                 return
+        logging.info(
+            '[%d] - [%d]: _on_remote_read 从远程读取数据成功' %
+            (
+                self._local_sock.fileno(),
+                self._remote_sock.fileno()
+            )
+        )
         if not data:
+            logging.info(
+                '[%d] - [%d]: _on_remote_read 远程读取数据(%s)为空, 远程已经关闭了连接 调用销毁函数 destroy' %
+                (
+                    self._local_sock.fileno(),
+                    self._remote_sock.fileno(),
+                    ''.join(['0x%02x ' % ord(x) for x in data])
+                )
+            )
             self.destroy()
             return
 
         self._update_activity(len(data))
         data = self._cryptor.decrypt(data)
+        logging.info(
+            '[%d] - [%d]: _on_remote_read 解密从远程读取的数据(%s)' %
+            (
+                self._local_sock.fileno(),
+                self._remote_sock.fileno(),
+                data
+            )
+        )
         try:
+            logging.info(
+                '[%d] - [%d]: _on_remote_read 将解密过后的数据(%s)写向 _local_sock' %
+                (
+                    self._local_sock.fileno(),
+                    self._remote_sock.fileno(),
+                    ''.join(['0x%02x ' % ord(x) for x in data])
+                )
+            )
             self._write_to_sock(data, self._local_sock)
         except Exception as e:
             shell.print_exception(e)
@@ -438,7 +583,7 @@ class TCPRelayHandler(object):
         else:
             logging.debug('destroy')
 
-        if self.remote_sock:
+        if self._remote_sock:
             logging.debug('destroying remote')
             self._loop.remove(self._remote_sock)
             del self._fd_to_handlers[self._remote_sock.fileno()]
@@ -452,11 +597,6 @@ class TCPRelayHandler(object):
             self._local_sock = None
         self._dns_resolver.remove_callback(self._handle_dns_resolved)
         self._server.remove_handler(self)
-
-
-
-
-
 
 
 class TCPRelay(object):
@@ -499,26 +639,25 @@ class TCPRelay(object):
             raise Exception('already add to loop')
         if self._closed:
             raise Exception('already closed')
-        
+
         self._eventloop = loop
+        logging.info('[%d]: add_to_loop 将服务端 socket 加入 loop' %
+                     (self._server_socket.fileno()))
         self._eventloop.add(self._server_socket,
                             eventloop.POLL_IN | eventloop.POLL_ERR,
                             self)
-    
+
     def handle_event(self, sock, fd, eventMode):
-        if sock:
-            logging.info(
-                'fd: %d, mode: %s', 
-                fd, eventloop.EVENT_NAMES.get(eventMode, None)
-            )
-        
         if sock == self._server_socket:
             if eventMode & eventloop.POLL_ERR:
                 raise Exception('server_socket error')
             try:
-                logging.debug('server socket accept connection')
+                logging.info('[%d]: handle_event 客户端向服务端socket请求连接' %
+                             (self._server_socket.fileno()))
                 conn = self._server_socket.accept()
-
+                logging.info(
+                    '[%d]: handle_event 服务器接受该请求, 并生成一个 socket[fd: %d] 和其通讯' %
+                    (self._server_socket.fileno(), conn[0].fileno()))
                 TCPRelayHandler(
                     self, self._fd_to_handlers,
                     self._eventloop, conn[0],
@@ -540,7 +679,7 @@ class TCPRelay(object):
                     handler.handle_event(sock, eventMode)
             else:
                 logging.warn('poll removed fd %d', fd)
-    
+
     def update_activity(self, handler, data_len):
         if data_len and self._stat_callback:
             self._stat_callback(self._listen_port, data_len)
@@ -564,6 +703,3 @@ class TCPRelay(object):
         if index >= 0:
             self._timeouts[index] = None
             del self._handler_to_timeouts[hash(handler)]
-
-
-

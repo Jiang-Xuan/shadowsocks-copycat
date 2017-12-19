@@ -83,8 +83,10 @@ class KqueueLoop(object):
         for e in events:
             fd = e.ident
             if e.filter == select.KQ_FILTER_READ:
+                logging.info('[%d]: poll 数据可读事件发生' % (fd))
                 result[fd] |= POLL_IN
             elif e.filter == select.KQ_FILTER_WRITE:
+                logging.info('[%d]: poll 数据可写事件发生' % (fd))
                 result[fd] |= POLL_OUT
         return result.items()
 
