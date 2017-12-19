@@ -73,6 +73,13 @@ WAIT_STATUS_READING = 1
 WAIT_STATUS_WRITING = 2
 WAIT_STATUS_READWRITING = WAIT_STATUS_READING | WAIT_STATUS_WRITING
 
+WAIT_STATUS_NAMES = {
+    WAIT_STATUS_INIT: 'WAIT_STATUS_INIT',
+    WAIT_STATUS_READING: 'WAIT_STATUS_READING',
+    WAIT_STATUS_WRITING: 'WAIT_STATUS_WRITING',
+    WAIT_STATUS_READWRITING: 'WAIT_STATUS_READWRITING'
+}
+
 BUF_SIZE = 32 * 1024
 UP_STREAM_BUF_SIZE = 16 * 1024
 DOWN_STREAM_BUG_SIZE = 32 * 1024
@@ -269,39 +276,118 @@ class TCPRelayHandler(object):
     def _update_stream(self, stream, status):
         dirty = False
         if stream == STREAM_DOWN:
+            logging.info(
+                '[%d]: _update_stream 当前的 STREAM_DOWN 的数据流向为 %s 更新 STREAM_DOWN 的数据流方向为 %s' %
+                (
+                    self._local_sock.fileno(),
+                    WAIT_STATUS_NAMES.get(self._downstream_status),
+                    WAIT_STATUS_NAMES.get(status)
+                )
+            )
             if self._downstream_status != status:
                 self._downstream_status = status
                 dirty = True
         elif stream == STREAM_UP:
+            logging.info(
+                '[%d]: _update_stream 当前的 STREAM_UP 的数据流向为 %s 更新 STREAM_UP 的数据流方向为 %s' %
+                (
+                    self._local_sock.fileno(),
+                    WAIT_STATUS_NAMES.get(self._upstream_status),
+                    WAIT_STATUS_NAMES.get(status)
+                )
+            )
             if self._upstream_status != status:
                 self._upstream_status = status
                 dirty = True
         if not dirty:
+
             return
 
         if self._local_sock:
+            logging.info(
+                '[%d]: _update_stream 更新 _local_sock 的监听模式' %
+                (self._local_sock.fileno())
+            )
             event = eventloop.POLL_ERR
             if self._downstream_status & WAIT_STATUS_WRITING:
+                logging.info(
+                    '[%d]: _downstream_status 包含 WAIT_STATUS_WRITING 监听 POLL_OUT' %
+                    (self._local_sock.fileno())
+                )
                 event |= eventloop.POLL_OUT
             if self._upstream_status & WAIT_STATUS_READING:
+                logging.info(
+                    '[%d]: _upstream_status 包含 WAIT_STATUS_READING 监听 POLL_IN' %
+                    (self._local_sock.fileno())
+                )
                 event |= eventloop.POLL_IN
             self._loop.modify(self._local_sock, event)
         if self._remote_sock:
+            logging.info(
+                '[%d] - [%d]: _update_stream 更新 _remote_sock 的监听模式' %
+                (self._local_sock.fileno(), self._remote_sock.fileno())
+            )
             event = eventloop.POLL_ERR
             if self._downstream_status & WAIT_STATUS_READING:
+                logging.info(
+                    '[%d] - [%d]: _downstream_status 包含 WAIT_STATUS_READING 监听 POLL_IN' %
+                    (self._local_sock.fileno(), self._remote_sock.fileno())
+                )
                 event |= eventloop.POLL_IN
             if self._upstream_status & WAIT_STATUS_WRITING:
+                logging.info(
+                    '[%d] - [%d]: _upstream_status 包含 WAIT_STATUS_WRITING 监听 POLL_OUT' %
+                    (self._local_sock.fileno(), self._remote_sock.fileno())
+                )
                 event |= eventloop.POLL_OUT
             self._loop.modify(self._remote_sock, event)
 
     def _write_to_sock(self, data, sock):
         if not data or not sock:
             return False
+
+        if self._remote_sock:
+            logging.info(
+                '[%d] - [%d]: _write_to_sock 尝试向[fd: %d]写数据' %
+                (
+                    self._local_sock.fileno(),
+                    self._remote_sock.fileno(),
+                    sock.fileno())
+                )
+        else:
+            logging.info(
+                '[%d]: _write_to_sock 尝试向[fd: %d]写数据' %
+                (
+                    self._local_sock.fileno(),
+                    sock.fileno())
+                )
+
         # 标识数据是否完全发送
         uncomplete = False
         try:
             l = len(data)
             s = sock.send(data)
+
+            if self._remote_sock:
+                logging.info(
+                    '[%d] - [%d]: _write_to_sock 数据长度为[%s], 成功写入的数据长度为[%s]' %
+                    (
+                        self._local_sock.fileno(),
+                        self._remote_sock.fileno(),
+                        l,
+                        s
+                    )
+                )
+            else:
+                logging.info(
+                    '[%d]: _write_to_sock 数据长度为[%s], 成功写入的数据长度为[%s]' %
+                    (
+                        self._local_sock.fileno(),
+                        l,
+                        s
+                    )
+                )
+
             if s < l:
                 data = data[s:]
                 uncomplete = True
@@ -324,6 +410,23 @@ class TCPRelayHandler(object):
                 logging.error('write_all_to_sock: unknown socket')
         else:
             if sock == self._local_sock:
+
+                if self._remote_sock:
+                    logging.info(
+                        '[%d] - [%d]: _write_to_sock 数据流向 _local_sock 端, 并且 completed. 更新 STREAM_DOWN 的流向为读, 不再监听 _local_sock 的写事件' %
+                        (
+                            self._local_sock.fileno(),
+                            self._remote_sock.fileno(),
+                        )
+                    )
+                else:
+                    logging.info(
+                        '[%d]: _write_to_sock 数据流向 _local_sock 端, 并且 completed. 更新 STREAM_DOWN 的流向为读, 不再监听 _local_sock 的写事件' %
+                        (
+                            self._local_sock.fileno(),
+                        )
+                    )
+                
                 self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
             elif sock == self._remote_sock:
                 self._update_stream(STREAM_UP, WAIT_STATUS_READING)
@@ -376,9 +479,8 @@ class TCPRelayHandler(object):
                             self._local_sock)
         data_to_send = self._cryptor.encrypt(data)
         logging.info(
-            '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 加密后的请求数据(%s)' %
-            (self._local_sock.fileno(), data_to_send)
-        )
+            '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 加密后的请求数据(%s)'
+            % (self._local_sock.fileno(), data_to_send))
         self._data_to_write_to_remote.append(data_to_send)
 
         logging.info(
@@ -392,11 +494,11 @@ class TCPRelayHandler(object):
         logging.info(
             '[%d] - [%d]: _handle_stage_connecting 处理 stSTAGE_CONNECTING 阶段的数据(%s)'
             % (self._local_sock.fileno(), self._remote_sock.fileno(),
-               data))
+               data.replace('\r\n', ' ')))
         data = self._cryptor.encrypt(data)
         self._data_to_write_to_remote.append(data)
         logging.info(
-            '[%d] - [%d]: _handle_stage_connecting 加密后数据(%s) 数据被添加进 _data_to_write_to_remote 因为此时 remote_sock[fd: %d] 还没有建立连接' %
+            '[%d] - [%d]: _handle_stage_connecting 加密后数据(%s) 数据被添加进 _data_to_write_to_remote 因为此时 remote_sock[fd: %d] 还没有建立连接, 一旦建立连接, 走的就是 STAGE_STREAM 逻辑' %
             (
                 self._local_sock.fileno(),
                 self._remote_sock.fileno(),
@@ -507,17 +609,14 @@ class TCPRelayHandler(object):
     def _handle_stage_stream(self, data):
         logging.info(
             '[%d] - [%d]: _handle_stage_stream STAGE_STREAM 阶段, 直接将数据(%s)加密后写向 _remote_sock'
-            % (self._local_sock.fileno(), self._remote_sock.fileno(),
-               data))
+            % (self._local_sock.fileno(), self._remote_sock.fileno(), data))
         data = self._cryptor.encrypt(data)
         self._write_to_sock(data, self._remote_sock)
         return
 
     def _on_remote_read(self):
-        logging.info(
-            '[%d] - [%d]: _on_remote_read 从远程读取数据' %
-            (self._local_sock.fileno(), self._remote_sock.fileno())
-        )
+        logging.info('[%d] - [%d]: _on_remote_read 从远程读取数据' %
+                     (self._local_sock.fileno(), self._remote_sock.fileno()))
         data = None
 
         buf_size = UP_STREAM_BUF_SIZE
@@ -525,46 +624,30 @@ class TCPRelayHandler(object):
         try:
             data = self._remote_sock.recv(buf_size)
         except (OSError, IOError) as e:
-            if eventloop.errno_from_exception(e) in (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
+            if eventloop.errno_from_exception(e) in (errno.ETIMEDOUT,
+                                                     errno.EAGAIN,
+                                                     errno.EWOULDBLOCK):
                 return
-        logging.info(
-            '[%d] - [%d]: _on_remote_read 从远程读取数据成功' %
-            (
-                self._local_sock.fileno(),
-                self._remote_sock.fileno()
-            )
-        )
+        logging.info('[%d] - [%d]: _on_remote_read 从远程读取数据成功' %
+                     (self._local_sock.fileno(), self._remote_sock.fileno()))
         if not data:
             logging.info(
-                '[%d] - [%d]: _on_remote_read 远程读取数据(%s)为空, 远程已经关闭了连接 调用销毁函数 destroy' %
-                (
-                    self._local_sock.fileno(),
-                    self._remote_sock.fileno(),
-                    ''.join(['0x%02x ' % ord(x) for x in data])
-                )
-            )
+                '[%d] - [%d]: _on_remote_read 远程读取数据(%s)为空, 远程已经关闭了连接 调用销毁函数 destroy'
+                % (self._local_sock.fileno(), self._remote_sock.fileno(),
+                   data))
             self.destroy()
             return
 
         self._update_activity(len(data))
         data = self._cryptor.decrypt(data)
-        logging.info(
-            '[%d] - [%d]: _on_remote_read 解密从远程读取的数据(%s)' %
-            (
-                self._local_sock.fileno(),
-                self._remote_sock.fileno(),
-                data
-            )
-        )
+        logging.info('[%d] - [%d]: _on_remote_read 解密从远程读取的数据(%s)' %
+                     (self._local_sock.fileno(), self._remote_sock.fileno(),
+                      data.replace('\r\n', ' ')))
         try:
             logging.info(
-                '[%d] - [%d]: _on_remote_read 将解密过后的数据(%s)写向 _local_sock' %
-                (
-                    self._local_sock.fileno(),
-                    self._remote_sock.fileno(),
-                    ''.join(['0x%02x ' % ord(x) for x in data])
-                )
-            )
+                '[%d] - [%d]: _on_remote_read try将解密过后的数据(%s)写向 _local_sock' %
+                (self._local_sock.fileno(), self._remote_sock.fileno(),
+                 data.replace('\r\n', ' ')))
             self._write_to_sock(data, self._local_sock)
         except Exception as e:
             shell.print_exception(e)
@@ -618,7 +701,8 @@ class TCPRelay(object):
 
         self._listen_port = listen_port
 
-        addrs = socket.getaddrinfo(listen_addr, listen_port, 0, socket.SOCK_STREAM, socket.SOL_TCP)
+        addrs = socket.getaddrinfo(listen_addr, listen_port, 0,
+                                   socket.SOCK_STREAM, socket.SOL_TCP)
 
         if len(addrs) == 0:
             raise Exception("can't get addrinfo for %s:%d" % (listen_addr, listen_port))
@@ -691,7 +775,7 @@ class TCPRelay(object):
         index = self._handler_to_timeouts.get(hash(handler), -1)
 
         if index >= 0:
-            self._timeout[index] = None
+            self._timeouts[index] = None
         length = len(self._timeouts)
 
         self._timeouts.append(handler)
