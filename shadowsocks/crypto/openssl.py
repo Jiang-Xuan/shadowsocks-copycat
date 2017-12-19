@@ -23,7 +23,6 @@ ctx_cleanup = None
 
 CIPHER_ENC_UNCHANGED = -1
 
-
 def load_openssl(crypto_path=None):
     global loaded, libcrypto, libsodium, buf, ctx_cleanup
 

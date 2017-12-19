@@ -38,11 +38,9 @@ def get_config(is_local):
     # 设置日志输出级别和格式
     logging.basicConfig(level = logging.DEBUG,
                         format = '%(levelname)-s: %(message)s')
-    # 是否为 local 配置文件
-    if is_local:
-        shortopts = 'hd:s:b:p:k:l:m:c:t:vqa'
-        longopts = ['help', 'fast-open', 'pid-file=', 'log-file','user=',
-                    'libopenssl=', 'libmbedtls=', 'libsodium=', 'version']
+    shortopts = 'hd:s:b:p:k:l:m:c:t:vqa'
+    longopts = ['help', 'fast-open', 'pid-file=', 'log-file','user=',
+                'libopenssl=', 'libmbedtls=', 'libsodium=', 'version']
 
     try:
         # try 寻找配置文件
@@ -168,7 +166,9 @@ def get_config(is_local):
     else:
         level = logging.INFO
     verbose = config['verbose']
-    logging.basicConfig(level = level,
+    logging.basicConfig(
+                        # filename = config['log-file'],
+                        level = level,
                         format = '%(asctime)s %(levelname)-8s %(message)s',
                         datefmt = '%Y-%m-%d %H:%M:%S')
 

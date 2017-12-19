@@ -8,5 +8,6 @@
     "method": "aes-256-cfb",
     "fast_open": false,
     "dns_server": ["8.8.8.8", "8.8.8.4"],
-    "verbose": 1
+    "verbose": 1,
+    "log-file": "/Users/jiangxuan/loveTech/shadowsocks-copycat/shadowsocks.log"
 }

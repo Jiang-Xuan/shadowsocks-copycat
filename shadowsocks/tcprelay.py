@@ -16,6 +16,7 @@ import time
 from shadowsocks import cryptor, eventloop, shell, common
 from shadowsocks.common import parse_header
 
+# 每一次轮询最多的 超时清理的大小
 TIMEOUT_CLEAN_SIZE = 512
 
 MSG_FASTOPEN = 0x20000000
@@ -60,7 +61,6 @@ for each handler, we have 2 stream directions:
     downstream: fron server to client direction
               read remote and write to local
 '''
-
 STREAM_UP = 0
 STREAM_DOWN = 1
 
@@ -119,7 +119,7 @@ def _check_auth_method(data):
         raise NoAcceptableMethods
 
 class TCPRelayHandler(object):
-    def __init__(self, server, fd_to_handlers, loop,local_sock, config, dns_resolver, is_local):
+    def __init__(self, server, fd_to_handlers, loop,local_sock, config, dns_resolver):
         self._server = server
         self._fd_to_handlers = fd_to_handlers
         self._loop = loop
@@ -288,14 +288,6 @@ class TCPRelayHandler(object):
                 self._downstream_status = status
                 dirty = True
         elif stream == STREAM_UP:
-            logging.info(
-                '[%d]: _update_stream 当前的 STREAM_UP 的数据流向为 %s 更新 STREAM_UP 的数据流方向为 %s' %
-                (
-                    self._local_sock.fileno(),
-                    WAIT_STATUS_NAMES.get(self._upstream_status),
-                    WAIT_STATUS_NAMES.get(status)
-                )
-            )
             if self._upstream_status != status:
                 self._upstream_status = status
                 dirty = True
@@ -304,41 +296,17 @@ class TCPRelayHandler(object):
             return
 
         if self._local_sock:
-            logging.info(
-                '[%d]: _update_stream 更新 _local_sock 的监听模式' %
-                (self._local_sock.fileno())
-            )
             event = eventloop.POLL_ERR
             if self._downstream_status & WAIT_STATUS_WRITING:
-                logging.info(
-                    '[%d]: _downstream_status 包含 WAIT_STATUS_WRITING 监听 POLL_OUT' %
-                    (self._local_sock.fileno())
-                )
                 event |= eventloop.POLL_OUT
             if self._upstream_status & WAIT_STATUS_READING:
-                logging.info(
-                    '[%d]: _upstream_status 包含 WAIT_STATUS_READING 监听 POLL_IN' %
-                    (self._local_sock.fileno())
-                )
                 event |= eventloop.POLL_IN
             self._loop.modify(self._local_sock, event)
         if self._remote_sock:
-            logging.info(
-                '[%d] - [%d]: _update_stream 更新 _remote_sock 的监听模式' %
-                (self._local_sock.fileno(), self._remote_sock.fileno())
-            )
             event = eventloop.POLL_ERR
             if self._downstream_status & WAIT_STATUS_READING:
-                logging.info(
-                    '[%d] - [%d]: _downstream_status 包含 WAIT_STATUS_READING 监听 POLL_IN' %
-                    (self._local_sock.fileno(), self._remote_sock.fileno())
-                )
                 event |= eventloop.POLL_IN
             if self._upstream_status & WAIT_STATUS_WRITING:
-                logging.info(
-                    '[%d] - [%d]: _upstream_status 包含 WAIT_STATUS_WRITING 监听 POLL_OUT' %
-                    (self._local_sock.fileno(), self._remote_sock.fileno())
-                )
                 event |= eventloop.POLL_OUT
             self._loop.modify(self._remote_sock, event)
 
@@ -346,47 +314,11 @@ class TCPRelayHandler(object):
         if not data or not sock:
             return False
 
-        if self._remote_sock:
-            logging.info(
-                '[%d] - [%d]: _write_to_sock 尝试向[fd: %d]写数据' %
-                (
-                    self._local_sock.fileno(),
-                    self._remote_sock.fileno(),
-                    sock.fileno())
-                )
-        else:
-            logging.info(
-                '[%d]: _write_to_sock 尝试向[fd: %d]写数据' %
-                (
-                    self._local_sock.fileno(),
-                    sock.fileno())
-                )
-
         # 标识数据是否完全发送
         uncomplete = False
         try:
             l = len(data)
             s = sock.send(data)
-
-            if self._remote_sock:
-                logging.info(
-                    '[%d] - [%d]: _write_to_sock 数据长度为[%s], 成功写入的数据长度为[%s]' %
-                    (
-                        self._local_sock.fileno(),
-                        self._remote_sock.fileno(),
-                        l,
-                        s
-                    )
-                )
-            else:
-                logging.info(
-                    '[%d]: _write_to_sock 数据长度为[%s], 成功写入的数据长度为[%s]' %
-                    (
-                        self._local_sock.fileno(),
-                        l,
-                        s
-                    )
-                )
 
             if s < l:
                 data = data[s:]
@@ -409,24 +341,7 @@ class TCPRelayHandler(object):
             else:
                 logging.error('write_all_to_sock: unknown socket')
         else:
-            if sock == self._local_sock:
-
-                if self._remote_sock:
-                    logging.info(
-                        '[%d] - [%d]: _write_to_sock 数据流向 _local_sock 端, 并且 completed. 更新 STREAM_DOWN 的流向为读, 不再监听 _local_sock 的写事件' %
-                        (
-                            self._local_sock.fileno(),
-                            self._remote_sock.fileno(),
-                        )
-                    )
-                else:
-                    logging.info(
-                        '[%d]: _write_to_sock 数据流向 _local_sock 端, 并且 completed. 更新 STREAM_DOWN 的流向为读, 不再监听 _local_sock 的写事件' %
-                        (
-                            self._local_sock.fileno(),
-                        )
-                    )
-                
+            if sock == self._local_sock:                
                 self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
             elif sock == self._remote_sock:
                 self._update_stream(STREAM_UP, WAIT_STATUS_READING)
@@ -683,9 +598,8 @@ class TCPRelayHandler(object):
 
 
 class TCPRelay(object):
-    def __init__(self, config, dns_resolver, is_local, stat_callback=None):
+    def __init__(self, config, dns_resolver, stat_callback=None):
         self._config = config
-        self._is_local = is_local
         self._dns_resolver = dns_resolver
         self._closed = False
         self._eventloop = None
@@ -745,8 +659,7 @@ class TCPRelay(object):
                 TCPRelayHandler(
                     self, self._fd_to_handlers,
                     self._eventloop, conn[0],
-                    self._config, self._dns_resolver,
-                    self._is_local
+                    self._config, self._dns_resolver
                 )
             except (OSError, IOError) as e:
                 errno_no = eventloop.errno_from_exception(e)

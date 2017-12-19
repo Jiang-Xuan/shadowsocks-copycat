@@ -1,0 +1,6 @@
+2017-12-19 20:25:06 WARNING  warning: you timeout 60000000 seems too long
+2017-12-19 20:25:06 INFO     Specified DNS server: ['8.8.8.8', '8.8.8.4']
+2017-12-19 20:25:06 INFO     loading libcrypto from /usr/lib/libcrypto.dylib
+2017-12-19 20:25:06 INFO     start local at 127.0.0.1:1111
+2017-12-19 20:25:06 INFO     使用 kqueue loop 模式
+2017-12-19 20:25:06 INFO     [5]: add_to_loop 将服务端 socket 加入 loop
