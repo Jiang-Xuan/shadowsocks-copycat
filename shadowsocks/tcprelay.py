@@ -154,7 +154,11 @@ class TCPRelayHandler(object):
             server_port = random.choice(server_port)
         if type(server) == list:
             server = random.choice(server)
-        logging.debug('chosen server: %s:%d', server, server_port)
+
+        logging.info(
+            '[%d]: _get_a_server 方法来选择一个服务器' %
+            (self._local_sock.fileno())
+        )
         return server, server_port
 
     def _update_activity(self, data_len = 0):
@@ -276,14 +280,6 @@ class TCPRelayHandler(object):
     def _update_stream(self, stream, status):
         dirty = False
         if stream == STREAM_DOWN:
-            logging.info(
-                '[%d]: _update_stream 当前的 STREAM_DOWN 的数据流向为 %s 更新 STREAM_DOWN 的数据流方向为 %s' %
-                (
-                    self._local_sock.fileno(),
-                    WAIT_STATUS_NAMES.get(self._downstream_status),
-                    WAIT_STATUS_NAMES.get(status)
-                )
-            )
             if self._downstream_status != status:
                 self._downstream_status = status
                 dirty = True
@@ -395,7 +391,7 @@ class TCPRelayHandler(object):
                             self._local_sock)
         data_to_send = self._cryptor.encrypt(data)
         logging.info(
-            '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 加密后的请求数据(%s)'
+            '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 将请求的地址加密(%s)'
             % (self._local_sock.fileno(), data_to_send))
         self._data_to_write_to_remote.append(data_to_send)
 
