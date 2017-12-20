@@ -382,6 +382,7 @@ class TCPRelayHandler(object):
 
         self._remote_address = (common.to_str(remote_addr), remote_port)
 
+        # 暂停读取 _local_sock 数据, 没有函数处理 STAGE_DNS 阶段的数据
         self._update_stream(STREAM_UP, WAIT_STATUS_WRITING)
         logging.info(
             '[%d]: _handle_stage_addr 进入 STAGE_DNS 阶段, 查询服务器的 IP地址' %
@@ -477,7 +478,9 @@ class TCPRelayHandler(object):
             '[%d] - [%d]: _handle_dns_resolved 进入 STAGE_CONNECTING 中' %
             (self._local_sock.fileno(), self._remote_sock.fileno()))
         self._stage = STAGE_CONNECTING
+        # 监听 remote_sock 的写事件, 因为想要向远程写数据
         self._update_stream(STREAM_UP, WAIT_STATUS_READWRITING)
+        # 监听 remote_sock 的读事件, 因为 remote_sock 有可能因为意外关闭连接(timeout, refused, 远程没有开启这个端口)
         self._update_stream(STREAM_DOWN, WAIT_STATUS_READING)
 
     def _create_remote_sock(self, ip, port):
@@ -489,6 +492,7 @@ class TCPRelayHandler(object):
                 (ip, port)
             )
 
+        # addressfamily socket类型 协议 权威性名字 socketaddress
         af, socktype, proto, canonname, sa = addrs[0]
 
         if self._forbidden_iplist:

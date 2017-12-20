@@ -22,7 +22,7 @@ def main():
     logging.info('start local at %s:%d' % 
                 (config['local_address'], config['local_port']))
     dns_resolver = asyncdns.DNSResolver()
-    tcp_server = tcprelay.TCPRelay(config, dns_resolver, True)
+    tcp_server = tcprelay.TCPRelay(config, dns_resolver)
     loop = eventloop.EventLoop()
 
     tcp_server.add_to_loop(loop)
