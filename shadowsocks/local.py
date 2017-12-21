@@ -52,18 +52,39 @@ const loggingStart = /^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}\s(?:INFO|DEBUGG|WARN
 const lifecycleStart = /\*\*\*\s\[(\d*)\]:\s(LIFECYCLE\sSTART)\s\*\*\*\s*\*\*\*\s\[\1\]:\s\2\sEND\s\*\*\*/
 // 这里匹配生命周期的结束 字符串
 let lifecycleEnd = /\*\*\*\s\[(filedescriptor)\]:\s(LIFECYCLE\sEND)\s\*\*\*\s*\*\*\*\s\[\1\]:\s\2\sEND\s\*\*\*/
-// 执行生命周期开始正则之后的结果
-const execStartStrResult = lifecycleStart.exec(str)
-// 匹配成功的 该次通讯的 file descriptor
-const fileDescriptor = execStartStrResult[1]
-console.log(fileDescriptor)
-// 这一次的匹配到这里
-const matchIndex = execStartStrResult.index
-console.log(matchIndex)
-// 根据上面获取的 file descripto 生成 生命周期结束的正则表达式
-lifecycleEnd = replace(lifecycleEnd)('filedescriptor', +fileDescriptor)()
-// 执行生命周期结束正则之后的结果
-const execEndStrResult = lifecycleEnd.exec(str)
-console.log(execEndStrResult)
 
+var strBackup = str
+var count = 0
+let result = []
+
+while (strBackup.length) {
+  const execStartStrResult = lifecycleStart.exec(strBackup)
+  if (!execStartStrResult) {
+    break
+  }
+  // debugger
+  // 这个字符串里面贮藏着 *** [7]: LIFECYCLE START *** *** [7]: LIFECYCLE START END *** 起始字符串, 因为在下面我要裁切掉这一段, 但是我要显示这一段, 所以在这里做一个备份, 在向 result<Array> 里面 push 的时候会将这个一段字符添加进去
+  const startStr = strBackup.substring(execStartStrResult.index, execStartStrResult.index + execStartStrResult[0].length)
+  // 裁剪字符串, 这里会将上面说的字符给裁切掉
+  strBackup = strBackup.substring(execStartStrResult.index + execStartStrResult[0].length)
+  // 该次通讯的 file descriptor
+  const fileDescriptor = execStartStrResult[1]
+  console.log(fileDescriptor)
+  // 这一次的匹配到这里
+  console.log(execStartStrResult.index)
+  // 生成 请求 END 字符匹配正则
+  const tmpLifecycleEnd = replace(lifecycleEnd)('filedescriptor', +fileDescriptor)()
+  const execEndStrResult = tmpLifecycleEnd.exec(str)
+  console.log(execEndStrResult)
+  
+  result.push({
+    index: count++,
+    fileDescriptor: execStartStrResult[1],
+    start: execStartStrResult.index,
+    end: execEndStrResult.index + execEndStrResult[0].length,
+    str: startStr + strBackup.substring(0, execEndStrResult.index + execEndStrResult[0].length)
+  })
+}
+
+console.log(result)
 '''

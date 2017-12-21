@@ -504,7 +504,7 @@ class TCPRelayHandler(object):
     def _handle_stage_stream(self, data):
         logging.info(
             '[%d] - [%d]: _handle_stage_stream STAGE_STREAM 阶段, 直接将数据(%s)加密后写向 _remote_sock'
-            % (self._local_sock.fileno(), self._remote_sock.fileno(), data))
+            % (self._local_sock.fileno(), self._remote_sock.fileno(), data.replace('\r\n', ' ')))
         data = self._cryptor.encrypt(data)
         self._write_to_sock(data, self._remote_sock)
         return
