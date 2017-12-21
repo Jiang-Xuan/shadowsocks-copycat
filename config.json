@@ -1,10 +1,10 @@
 {
     "server": "139.162.116.74",
-    "server_port": 3010,
+    "server_port": 8655,
     "local_address": "127.0.0.1",
     "local_port": 1111,
     "password": "986944",
-    "timeout": 60000000,
+    "timeout": 1000,
     "method": "aes-256-cfb",
     "fast_open": false,
     "dns_server": ["8.8.8.8", "8.8.8.4"],
