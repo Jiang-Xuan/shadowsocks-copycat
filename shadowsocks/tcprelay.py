@@ -53,7 +53,6 @@ STAGE_DNS = 3
 STAGE_CONNECTING = 4
 STAGE_STREAM = 5
 STAGE_DESTROYED = -1
-
 '''
 for each handler, we have 2 stream directions:
     upstream: from client to server direction
@@ -63,7 +62,6 @@ for each handler, we have 2 stream directions:
 '''
 STREAM_UP = 0
 STREAM_DOWN = 1
-
 '''
 for each stream, it's waiting for reading, or writing, or both
 这些状态控制着 socket 的监听模式
@@ -83,12 +81,15 @@ WAIT_STATUS_NAMES = {
 BUF_SIZE = 32 * 1024
 UP_STREAM_BUF_SIZE = 16 * 1024
 DOWN_STREAM_BUG_SIZE = 32 * 1024
-
 '''
 helper exceptions for TCPRelayHandler
 '''
+
+
 class BadSocksHeader(Exception):
     pass
+
+
 class NoAcceptableMethods(Exception):
     pass
 
@@ -122,9 +123,12 @@ class TCPRelayHandler(object):
     def __init__(self, server, fd_to_handlers, loop,local_sock, config, dns_resolver):
         logging.info('''
             *** [%d]: LIFECYCLE START ***
-            *** [%d]: LIFECYCLE START END ***
-            '''.strip() % (local_sock.fileno(), local_sock.fileno()))
+            '''.strip() % (local_sock.fileno()))
 
+        logging.info(
+            '[%d]: 创建关于该请求的 TCPReplyHandler 并将其添加进 loop' %
+            (local_sock.fileno())
+        )
         self._server = server
         self._fd_to_handlers = fd_to_handlers
         self._loop = loop
@@ -384,7 +388,7 @@ class TCPRelayHandler(object):
         data_to_send = self._cryptor.encrypt(data)
         logging.info(
             '[%d]: _handle_stage_addr 响应给浏览器(\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x10)成功, 将请求的地址加密(%s)'
-            % (self._local_sock.fileno(), data_to_send))
+            % (self._local_sock.fileno(), '...'))
         self._data_to_write_to_remote.append(data_to_send)
 
         logging.info(
@@ -395,7 +399,7 @@ class TCPRelayHandler(object):
 
     def _handle_stage_connecting(self, data):
         logging.info(
-            '[%d] - [%d]: _handle_stage_connecting 处理 stSTAGE_CONNECTING 阶段的数据(%s)'
+            '[%d] - [%d]: _handle_stage_connecting 处理 STAGE_CONNECTING 阶段的数据(%s)'
             % (self._local_sock.fileno(), self._remote_sock.fileno(),
                data.replace('\r\n', ' ')))
         data = self._cryptor.encrypt(data)
@@ -403,7 +407,7 @@ class TCPRelayHandler(object):
         logging.info(
             '[%d] - [%d]: _handle_stage_connecting 加密后数据(%s) 数据被添加进 _data_to_write_to_remote 因为此时 remote_sock[fd: %d] 还没有建立连接, 一旦建立连接, 走的就是 STAGE_STREAM 逻辑'
             % (self._local_sock.fileno(), self._remote_sock.fileno(),
-               ''.join(['0x%02x ' % ord(x) for x in data]),
+               '...',
                self._remote_sock.fileno()))
 
     def _handle_dns_resolved(self, result, error):
@@ -478,6 +482,11 @@ class TCPRelayHandler(object):
                     common.to_str(sa[0])
                 )
         remote_sock = socket.socket(af, socktype, proto)
+
+        logging.info('''
+            ****** _create_remote_sock local_fd: [%d] - remote_fd: [%d] ******
+            '''.strip() % (self._local_sock.fileno(), remote_sock.fileno()))
+
         self._remote_sock = remote_sock
         self._fd_to_handlers[remote_sock.fileno()] = self
         remote_sock.setblocking(False)
@@ -504,7 +513,8 @@ class TCPRelayHandler(object):
     def _handle_stage_stream(self, data):
         logging.info(
             '[%d] - [%d]: _handle_stage_stream STAGE_STREAM 阶段, 直接将数据(%s)加密后写向 _remote_sock'
-            % (self._local_sock.fileno(), self._remote_sock.fileno(), data.replace('\r\n', ' ')))
+            % (self._local_sock.fileno(), self._remote_sock.fileno(),
+               data[:100].replace('\r\n', ' ')))
         data = self._cryptor.encrypt(data)
         self._write_to_sock(data, self._remote_sock)
         return
@@ -579,8 +589,7 @@ class TCPRelayHandler(object):
 
         logging.info('''
             *** [%d]: LIFECYCLE END ***
-            *** [%d]: LIFECYCLE END END ***
-            '''.strip() % (loggingHelpVar, loggingHelpVar))
+            '''.strip() % (loggingHelpVar))
 
 
 class TCPRelay(object):

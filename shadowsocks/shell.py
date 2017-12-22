@@ -167,7 +167,7 @@ def get_config(is_local):
         level = logging.INFO
     verbose = config['verbose']
     logging.basicConfig(
-                        # filename = config['log-file'],
+                        filename = config['log-file'],
                         level = level,
                         format = '%(asctime)s %(levelname)-8s %(message)s',
                         datefmt = '%Y-%m-%d %H:%M:%S')
